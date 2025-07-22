@@ -1,11 +1,17 @@
 const db = require('../config/db');
 
 exports.createOrder = async (req, res) => {
-  const { customer_id, shop_id, items } = req.body;
+  const { customer_id, shop_id, warehouse_id, items } = req.body;
   const created_by = req.user.id;
 
-  if (!customer_id || !shop_id || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ message: 'Thiếu thông tin đơn hàng' });
+  if (!customer_id || !shop_id || !items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: 'Thiếu thông tin bắt buộc: customer_id, shop_id hoặc danh sách sản phẩm' });
+  }
+
+  for (const item of items) {
+    if (!item.product_id || item.quantity == null || item.quantity <= 0) {
+      return res.status(400).json({ message: 'Thông tin sản phẩm không hợp lệ: thiếu product_id hoặc quantity' });
+    }
   }
 
   const conn = await db.getConnection();
@@ -13,71 +19,118 @@ exports.createOrder = async (req, res) => {
 
   try {
     let total_price = 0;
+    let tax = 0;
 
     for (const item of items) {
-      if (!item.category_id || !item.warehouse_id) {
-        await conn.rollback();
-        return res.status(400).json({ message: `Thiếu kho / danh mục cho sản phẩm ID ${item.product_id}` });
-      }
+      const price = item.price || 0;
+      const sale_price = item.sale_price !== undefined ? item.sale_price : null;
+      const priceToUse = sale_price !== null ? sale_price : price;
+      const quantity = Number(item.quantity) || 0;
+      total_price += priceToUse * quantity;
+    }
 
-      const [rows] = await conn.execute(
-        `SELECT quantity FROM product_quantity WHERE product_id = ? AND category_id = ? AND warehouse_id = ? AND shop_id = ?`,
-        [item.product_id, item.category_id, item.warehouse_id, shop_id]
+    const [customerRows] = await conn.execute(
+      'SELECT * FROM customer WHERE id = ?',
+      [customer_id]
+    );
+    const customer = customerRows[0];
+    if (!customer) {
+      throw new Error('Không tìm thấy khách hàng');
+    }
+
+    for (const item of items) {
+      const [categoryRows] = await conn.execute(
+        'SELECT * FROM category WHERE id = ?',
+        [item.category_id]
       );
-
-      if (rows.length === 0) {
-        await conn.rollback();
-        return res.status(400).json({ message: `Không tìm thấy tồn kho cho sản phẩm ID ${item.product_id}` });
+      const category = categoryRows[0];
+      if (!category) {
+        throw new Error(`Không tìm thấy danh mục cho sản phẩm ${item.product_id}`);
       }
 
-      if (rows[0].quantity < item.quantity) {
-        await conn.rollback();
-        return res.status(400).json({ message: `Sản phẩm ID ${item.product_id} không đủ hàng` });
-      }
+      const price = item.price || 0;
+      const sale_price = item.sale_price !== undefined ? item.sale_price : null;
+      const priceToUse = sale_price !== null ? sale_price : price;
+      const quantity = Number(item.quantity) || 0;
+      
+      const taxRate = category.name.toLowerCase().includes('đồ ăn') ? 0.08 : 0.1;
+      tax += priceToUse * quantity * taxRate;
     }
-
-    for (const item of items) {
-      total_price += item.price * item.quantity;
-    }
-    const tax = Math.round(total_price * 0.08);
-    const grandTotal = total_price + tax;
-
-    const [[{ count }]] = await conn.execute(`SELECT COUNT(*) AS count FROM orders`);
-    const code = `ORD${String(count + 1).padStart(2, '0')}`;
 
     const [orderResult] = await conn.execute(
-      `INSERT INTO orders (code, customer_id, shop_id, total_price, tax, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [code, customer_id, shop_id, grandTotal, tax, created_by]
+      `INSERT INTO orders (customer_id, shop_id, total_price, tax, created_by) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [customer_id, shop_id, total_price, tax, created_by]
     );
     const order_id = orderResult.insertId;
 
     for (const item of items) {
-      const itemTotal = item.price * item.quantity;
-      const [[prod]] = await conn.execute(`SELECT code, name FROM product WHERE id = ?`, [item.product_id]);
-
-      await conn.execute(
-        `INSERT INTO order_detail (order_id, product_id, product_code, product_name, quantity, total_price, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [order_id, item.product_id, prod?.code || '', prod?.name || '', item.quantity, itemTotal, created_by]
+      const [productRows] = await conn.execute(
+        'SELECT * FROM product WHERE id = ?',
+        [item.product_id]
       );
+      const prod = productRows[0];
+      if (!prod) {
+        throw new Error(`Không tìm thấy sản phẩm với ID: ${item.product_id}`);
+      }
 
-      await conn.execute(
-        `UPDATE product_quantity SET quantity = quantity - ? WHERE product_id = ? AND category_id = ? AND warehouse_id = ? AND shop_id = ?`,
-        [item.quantity, item.product_id, item.category_id, item.warehouse_id, shop_id]
+      const price = item.price || 0;
+      const sale_price = item.sale_price !== undefined ? item.sale_price : null;
+      const priceToUse = sale_price !== null ? sale_price : price;
+      const quantity = Number(item.quantity) || 0;
+      const itemTotal = priceToUse * quantity;
+
+      const params = [
+        order_id,
+        item.product_id,
+        prod.code || '',
+        prod.name || '',
+        quantity,
+        price,
+        sale_price,
+        itemTotal,
+        prod.description || '',
+        (prod.weight !== undefined && prod.weight !== null) ? prod.weight : null,
+        prod.unit || '',
+        prod.expiry_date || null,
+        created_by
+      ];
+
+      if (params.some(p => p === undefined)) {
+        throw new Error(`Dữ liệu sản phẩm không hợp lệ: có tham số undefined`);
+      }
+
+      await conn.execute(`
+        INSERT INTO order_detail (
+          order_id, product_id, product_code, product_name, 
+          quantity, price, sale_price, total_price, 
+          description, weight, unit, expiry_date, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params
       );
     }
 
     await conn.commit();
-    res.status(201).json({ message: 'Tạo đơn hàng thành công', order_id, code });
-  } catch (err) {
+    res.status(201).json({ 
+      success: true,
+      message: 'Đã tạo đơn hàng thành công', 
+      order_id,
+      total_price,
+      tax
+    });
+  } catch (error) {
     await conn.rollback();
-    console.error('Lỗi tạo đơn hàng:', err);
-    res.status(500).json({ message: 'Lỗi server khi tạo đơn hàng' });
+    console.error('Lỗi createOrder:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Lỗi khi tạo đơn hàng', 
+      error: error.message 
+    });
   } finally {
     conn.release();
   }
 };
+
 
 exports.createCustomerIfNotExists = async (req, res) => {
   const { name, phone } = req.body;
@@ -98,19 +151,36 @@ exports.createCustomerIfNotExists = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, search } = req.query;
+
     let query = `
-      SELECT o.id, o.code, o.total_price, o.tax, o.status, o.created_at,
-             c.name AS customer_name, s.name AS shop_name
+      SELECT 
+        o.id, o.code, o.total_price, o.tax, o.status, o.payment_method, o.created_at,
+        c.name AS customer_name, s.name AS shop_name, u.name AS created_by_name
       FROM orders o
       LEFT JOIN customer c ON o.customer_id = c.id
       LEFT JOIN shop s ON o.shop_id = s.id
+      LEFT JOIN users u ON o.created_by = u.id
     `;
+
+    const conditions = [];
     const params = [];
+
     if (status) {
-      query += ' WHERE o.status = ?';
+      conditions.push('o.status = ?');
       params.push(status);
     }
+
+    if (search) {
+      const keyword = `%${search}%`;
+      conditions.push(`(o.code LIKE ? OR c.name LIKE ? OR s.name LIKE ? OR u.name LIKE ?)`); 
+      params.push(keyword, keyword, keyword, keyword);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+
     query += ' ORDER BY o.created_at DESC';
 
     const [rows] = await db.query(query, params);
@@ -121,23 +191,23 @@ exports.getAllOrders = async (req, res) => {
   }
 };
 
-exports.updateOrderStatus = async (req, res) => {
+
+exports.getOrderInfo = async (req, res) => {
   const { orderId } = req.params;
-  const { status } = req.body;
-
-  const validStatuses = ['đang xử lý', 'chờ lấy hàng', 'thành công'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
-  }
-
   try {
-    const [result] = await db.query(`UPDATE orders SET status = ? WHERE id = ?`, [status, orderId]);
-    if (result.affectedRows === 0) {
+    const [[order]] = await db.query(`
+      SELECT o.id, o.code, o.total_price, o.tax, o.status, o.created_at, 
+             c.name AS customer_name, s.name AS shop_name
+      FROM orders o
+      LEFT JOIN customer c ON o.customer_id = c.id
+      LEFT JOIN shop s ON o.shop_id = s.id
+      WHERE o.id = ?`, [orderId]);
+    if (!order) {
       return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
     }
-    res.json({ message: 'Cập nhật trạng thái thành công' });
+    res.json(order);
   } catch (err) {
-    console.error('Lỗi cập nhật trạng thái:', err);
+    console.error('Lỗi getOrderInfo:', err);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
@@ -146,13 +216,16 @@ exports.getOrderDetails = async (req, res) => {
   const { orderId } = req.params;
   try {
     const [rows] = await db.query(`
-      SELECT o.code AS order_code, od.product_code, od.product_name, od.quantity, od.total_price, od.created_at, od.created_by
+      SELECT od.*, p.description, p.weight, p.unit, p.expiry_date, p.sale_price,
+             pi.url AS image_url, u.name AS creator_name
       FROM order_detail od
-      JOIN orders o ON od.order_id = o.id
+      JOIN product p ON od.product_id = p.id
+      LEFT JOIN product_image pi ON p.id = pi.product_id
+      LEFT JOIN users u ON od.created_by = u.id
       WHERE od.order_id = ?`, [orderId]);
     res.json(rows);
   } catch (err) {
-    console.error('Lỗi lấy chi tiết đơn hàng:', err);
+    console.error('Lỗi getOrderDetails:', err);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
@@ -179,10 +252,16 @@ exports.getProductsByShopWarehouse = async (req, res) => {
   const { shopId, warehouseId } = req.params;
   try {
     const [rows] = await db.query(`
-      SELECT p.id, p.code, p.name, p.price, pq.quantity, pq.category_id, pq.warehouse_id, pq.shop_id, c.name AS category_name
+      SELECT 
+        p.id, p.code, p.name, p.price, p.sale_price, 
+        p.description, p.weight, p.unit, p.expiry_date,
+        pi.url AS image_url,
+        pq.quantity, pq.category_id, pq.warehouse_id, pq.shop_id, 
+        c.name AS category_name
       FROM product_quantity pq
       JOIN product p ON pq.product_id = p.id
       JOIN category c ON pq.category_id = c.id
+      LEFT JOIN product_image pi ON p.id = pi.product_id
       WHERE pq.shop_id = ? AND pq.warehouse_id = ?`,
       [shopId, warehouseId]
     );

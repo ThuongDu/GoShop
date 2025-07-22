@@ -4,14 +4,23 @@ const auth = require('../middleware/auth');
 const role = require('../middleware/role');
 const productQuantityController = require('../controllers/productquantityController');
 
-router.post('/', auth, role('admin', 'staff'), productQuantityController.createQuantity);
-router.get('/', auth, role('admin'), productQuantityController.getAllQuantities);
-router.get('/my', auth, role('staff'), productQuantityController.getMyQuantities);
-router.post('/add-many', auth, productQuantityController.addManyProductToWarehouse);
+router.post('/', auth, role('admin', 'staff'), productQuantityController.createQuantity);          
+router.put('/:id', auth, role('admin', 'staff'), productQuantityController.updateQuantity);        
+router.delete('/:id', auth, role('admin', 'staff'), productQuantityController.deleteQuantity);   
 router.get('/by-warehouse', auth, role('admin', 'staff'), productQuantityController.getQuantitiesByWarehouse);
-router.delete('/:id', auth, role('admin', 'staff'), productQuantityController.deleteQuantity);
-router.put('/:id', auth, role('admin', 'staff'), productQuantityController.updateQuantity);
-router.get('/current', auth, role('admin','staff'), productQuantityController.getCurrentQuantities);
-router.get('/staff/quantities', auth, role('staff','admin'), productQuantityController.getMyShopQuantities);
+router.get('/current', auth, role('admin', 'staff'), productQuantityController.getCurrentQuantities);
+router.get(
+  '/group-by-product', 
+  auth, 
+  productQuantityController.getQuantitiesGroupByProduct
+);
+router.get('/', auth, role('admin'), productQuantityController.getAllQuantities);                  
+router.post('/add-many', auth, role('admin'), productQuantityController.addManyProductToWarehouse); 
+
+router.get('/my', auth, role('staff'), productQuantityController.getMyQuantities);                
+router.post('/staff/add', auth, role('staff'), productQuantityController.addQuantityByStaff);       
+router.get('/staff/quantities', auth, role('staff','admin'), productQuantityController.getMyShopQuantities); 
+
+router.get('/shop/:shopId/warehouse/:warehouseId', auth, role('admin','staff'), productQuantityController.getProductsByShopWarehouse);
 
 module.exports = router;

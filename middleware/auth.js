@@ -22,7 +22,7 @@ module.exports = async (req, res, next) => {
     req.user = {
       id      : user.id,
       role    : user.role,
-      shop_id : user.shop_id          // ← cần cho staff
+      shop_id : user.shop_id       
     };
 
     next();

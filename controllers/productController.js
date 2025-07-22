@@ -1,28 +1,63 @@
 const db = require('../config/db');
 const path = require('path');
 
-const removeDiacritics = (str) =>
-  str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+const generateRandomNumber = (length) => {
+  const min = Math.pow(10, length - 1);
+  const max = Math.pow(10, length) - 1;
+  return Math.floor(min + Math.random() * (max - min + 1)).toString();
+};
 
 exports.createProductWithImage = async (req, res) => {
   try {
-    const { name, price, created_by, updated_by } = req.body;
+    const { 
+      name, 
+      price, 
+      created_by, 
+      updated_by,
+      description, 
+      weight, 
+      unit, 
+      sale_price,
+      expiry_date
+    } = req.body;
     const image = req.file;
 
     if (!name || !price || !created_by || !updated_by || !image) {
       return res.status(400).json({ message: 'Thiếu thông tin sản phẩm hoặc ảnh' });
     }
 
+    let code;
+    let isUnique = false;
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (!isUnique && attempts < maxAttempts) {
+      code = generateRandomNumber(11);
+      
+      const [[existingProduct]] = await db.query(
+        'SELECT id FROM product WHERE code = ? LIMIT 1',
+        [code]
+      );
+      
+      if (!existingProduct) {
+        isUnique = true;
+      }
+      attempts++;
+    }
+
+    if (!isUnique) {
+      return res.status(500).json({ message: 'Không thể tạo mã sản phẩm duy nhất' });
+    }
+
     const [productResult] = await db.query(
-      'INSERT INTO product (name, price, created_by, updated_by) VALUES (?, ?, ?, ?)',
-      [name, price, created_by, updated_by]
+      `INSERT INTO product 
+       (name, price, created_by, updated_by, description, weight, unit, sale_price, expiry_date, code) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, price, created_by, updated_by, description || null, weight || null, unit || null, sale_price || null, expiry_date || null, code]
     );
+    
     const productId = productResult.insertId;
-    const code = 'SP' + String(productId).padStart(3, '0');
-    await db.query(
-      'UPDATE product SET code = ? WHERE id = ?',
-      [code, productId]
-    );
+    
     const imageUrl = `uploads/${image.filename}`;
     await db.query(
       'INSERT INTO product_image (url, product_id) VALUES (?, ?)',
@@ -41,11 +76,18 @@ exports.createProductWithImage = async (req, res) => {
   }
 };
 
+
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
     const [[product]] = await db.query(`
-      SELECT p.*, u.name AS nameCreated 
+      SELECT 
+        p.*, 
+        u.name AS nameCreated,
+        CASE 
+          WHEN p.sale_price IS NOT NULL AND p.sale_price > 0 THEN p.sale_price
+          ELSE p.price
+        END AS display_price
       FROM product p
       LEFT JOIN users u ON p.created_by = u.id
       WHERE p.id = ?
@@ -124,15 +166,33 @@ exports.getAllProducts = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, price, updated_by } = req.body;
+    const { 
+      name, 
+      price, 
+      updated_by,
+      description, 
+      weight, 
+      unit, 
+      sale_price,
+      expiry_date 
+    } = req.body;
 
     if (!name || !price || !updated_by) {
       return res.status(400).json({ message: 'Thiếu thông tin cập nhật' });
     }
 
     const [result] = await db.query(
-      'UPDATE product SET name = ?, price = ?, updated_by = ? WHERE id = ?',
-      [name, price, updated_by, id]
+      `UPDATE product SET 
+        name = ?, 
+        price = ?, 
+        updated_by = ?,
+        description = ?,
+        weight = ?,
+        unit = ?,
+        sale_price = ?,
+        expiry_date = ?
+       WHERE id = ?`,
+      [name, price, updated_by, description || null, weight || null, unit || null, sale_price || null, expiry_date || null, id]
     );
 
     if (result.affectedRows === 0) {

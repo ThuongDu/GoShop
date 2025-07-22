@@ -4,12 +4,6 @@ exports.createWarehouse = async (req, res) => {
   const { name, shop_id } = req.body;
 
   try {
-    const [existing] = await db.query('SELECT * FROM warehouse WHERE shop_id = ?', [shop_id]);
-
-    if (existing.length > 0) {
-      return res.status(400).json({ message: 'Shop này đã có kho' });
-    }
-
     await db.query('INSERT INTO warehouse (name, shop_id) VALUES (?, ?)', [name, shop_id]);
     res.status(201).json({ message: 'Tạo kho thành công' });
   } catch (err) {

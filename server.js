@@ -19,6 +19,7 @@ const productCategoryRoutes = require('./routes/productcategoryRoutes');
 const customerRoutes = require('./routes/customerRoutes'); 
 const orderRoutes = require('./routes/orderRoutes');
 const staffRoutes = require('./routes/staffRoutes');
+const statisticsRoutes = require("./routes/staticRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use('/api/shops', shopRoutes);
@@ -30,6 +31,8 @@ app.use('/api/productcategories', productCategoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/staff', staffRoutes);
+app.use("/api/statistics", statisticsRoutes); 
+
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
