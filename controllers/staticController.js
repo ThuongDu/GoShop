@@ -134,7 +134,7 @@ exports.getTodayRevenueByStaff = async (req, res) => {
     const [rows] = await db.query(`
       SELECT 
         u.id, u.name,
-        SUM(o.total_price + o.tax) AS revenue
+        SUM(o.total_price) AS revenue
       FROM orders o
       JOIN users u ON o.created_by = u.id
       WHERE o.status = 'thành công' AND DATE(o.created_at) = CURDATE()

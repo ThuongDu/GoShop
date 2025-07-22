@@ -20,7 +20,6 @@ exports.createOrder = async (req, res) => {
         return res.status(400).json({ message: `Thiếu thông tin cho sản phẩm ID ${item.product_id}` });
       }
 
-      // Lấy giá từ bảng product, ưu tiên sale_price nếu > 0
       const [[product]] = await conn.execute(
         `SELECT price, sale_price, code, name FROM product WHERE id = ?`,
         [item.product_id]
@@ -249,19 +248,19 @@ exports.updateOrderStatus = async (req, res) => {
   const { status } = req.body;
   const user = req.user;
 
+  const valid = ['đang xử lý', 'chờ lấy hàng', 'thành công'];
+  if (!valid.includes(status)) return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
+
   try {
     if (user.role === 'staff') {
-      const [rows] = await db.query('SELECT * FROM orders WHERE id = ? AND shop_id = ?', [orderId, user.shop_id]);
-      if (rows.length === 0) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
+      const [[check]] = await db.query('SELECT id FROM orders WHERE id = ? AND shop_id = ?', [orderId, user.shop_id]);
+      if (!check) return res.status(403).json({ message: 'Access denied' });
     }
 
     await db.query('UPDATE orders SET status = ? WHERE id = ?', [status, orderId]);
     res.json({ message: 'Cập nhật trạng thái thành công' });
-
-  } catch (error) {
-    console.error('Lỗi cập nhật trạng thái:', error);
+  } catch (err) {
+    console.error('Lỗi updateOrderStatus:', err);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
@@ -301,7 +300,6 @@ exports.addQuantityByStaff = async (req, res) => {
   const user_shop_id  = req.user.shop_id;
 
   try {
-    // 1. xác thực kho thuộc shop
     const [rows] = await db.execute(
       `SELECT 1 FROM warehouse WHERE id = ? AND shop_id = ?`,
       [warehouse_id, user_shop_id]
@@ -309,7 +307,6 @@ exports.addQuantityByStaff = async (req, res) => {
     if (rows.length === 0)
       return res.status(403).json({ message: "Kho không thuộc cửa hàng của bạn" });
 
-    // 2. thêm vào product_quantity (có shop_id)
     await db.execute(`
       INSERT INTO product_quantity
       (product_id, image_id, category_id, warehouse_id, shop_id, quantity, created_by)
