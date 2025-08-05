@@ -32,8 +32,24 @@ const getRegionByProvince = (provinceName) => {
 // Lấy tất cả shop
 exports.getAllShops = async (req, res) => {
   try {
-    const [result] = await db.query('SELECT * FROM shop ORDER BY id DESC');
-    res.json(result);
+    let { page = 1, limit = 10, search = '' } = req.query;
+    page = parseInt(page);
+    limit = parseInt(limit);
+    const offset = (page - 1) * limit;
+    const searchTerm = `%${search}%`;
+
+    const [countResult] = await db.query(
+      `SELECT COUNT(*) as total FROM shop WHERE name LIKE ?`,
+      [searchTerm]
+    );
+    const total = countResult[0].total;
+
+    const [shops] = await db.query(
+      `SELECT * FROM shop WHERE name LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [searchTerm, limit, offset]
+    );
+
+    res.json({ data: shops, total });
   } catch (err) {
     console.error('Lỗi khi lấy danh sách shop:', err);
     res.status(500).json({ message: 'Lỗi khi lấy danh sách shop' });

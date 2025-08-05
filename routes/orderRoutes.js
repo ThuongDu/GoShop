@@ -15,6 +15,6 @@ router.get('/:orderId/details', auth, orderController.getOrderDetails);
 router.get('/products/:shopId/:warehouseId', auth, role('admin', 'staff'), orderController.getProductsByShopWarehouse);
 router.get('/products/:shopId/:warehouseId/:categoryId', auth, role('admin', 'staff'), orderController.getProductsByShopWarehouseCategory);
 
-router.patch('/:orderId/status', auth, role('admin', 'staff'), orderController.updateOrderStatus);
+router.patch('/:orderId/status', auth, orderController.updateOrderStatus);
 
 module.exports = router;

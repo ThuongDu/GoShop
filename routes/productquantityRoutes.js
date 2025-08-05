@@ -9,11 +9,7 @@ router.put('/:id', auth, role('admin', 'staff'), productQuantityController.updat
 router.delete('/:id', auth, role('admin', 'staff'), productQuantityController.deleteQuantity);   
 router.get('/by-warehouse', auth, role('admin', 'staff'), productQuantityController.getQuantitiesByWarehouse);
 router.get('/current', auth, role('admin', 'staff'), productQuantityController.getCurrentQuantities);
-router.get(
-  '/group-by-product', 
-  auth, 
-  productQuantityController.getQuantitiesGroupByProduct
-);
+router.get('/group-by-product', auth, productQuantityController.getQuantitiesGroupByProduct);
 router.get('/', auth, role('admin'), productQuantityController.getAllQuantities);                  
 router.post('/add-many', auth, role('admin'), productQuantityController.addManyProductToWarehouse); 
 

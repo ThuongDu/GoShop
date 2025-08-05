@@ -9,6 +9,7 @@ router.get ("/orders",           auth, staff.getOrdersByStaff);
 router.post("/orders",           auth, staff.createOrderByStaff);        
 router.post("/quantity",         auth, staff.addQuantityByStaff);     
 router.post("/customers",        auth, staff.createCustomerByStaff);    
-router.get ("/customers",        auth, staff.getCustomers);            
+router.get ("/customers",        auth, staff.getCustomers);          
+router.get ("/profile",          auth, staff.getStaffProfile);         
 
 module.exports = router;

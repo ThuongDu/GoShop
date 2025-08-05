@@ -17,8 +17,7 @@ exports.createProductWithImage = async (req, res) => {
       description, 
       weight, 
       unit, 
-      sale_price,
-      expiry_date
+      sale_price
     } = req.body;
     const image = req.file;
 
@@ -51,9 +50,9 @@ exports.createProductWithImage = async (req, res) => {
 
     const [productResult] = await db.query(
       `INSERT INTO product 
-       (name, price, created_by, updated_by, description, weight, unit, sale_price, expiry_date, code) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, price, created_by, updated_by, description || null, weight || null, unit || null, sale_price || null, expiry_date || null, code]
+       (name, price, created_by, updated_by, description, weight, unit, sale_price, code) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, price, created_by, updated_by, description || null, weight || null, unit || null, sale_price || null, code]
     );
     
     const productId = productResult.insertId;
@@ -75,7 +74,6 @@ exports.createProductWithImage = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server khi thêm sản phẩm' });
   }
 };
-
 
 exports.getProductById = async (req, res) => {
   try {
@@ -135,13 +133,15 @@ exports.getProductsByCategory = async (req, res) => {
   }
 };
 
-
 exports.getAllProducts = async (req, res) => {
   try {
     const [products] = await db.query(`
       SELECT 
         p.*, 
-        u.name AS nameCreated
+        u.name AS nameCreated,
+        p.weight,
+        p.unit,
+        p.sale_price
       FROM product p
       LEFT JOIN users u ON p.created_by = u.id
       ORDER BY p.created_at DESC
@@ -162,7 +162,6 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
@@ -173,8 +172,7 @@ exports.updateProduct = async (req, res) => {
       description, 
       weight, 
       unit, 
-      sale_price,
-      expiry_date 
+      sale_price
     } = req.body;
 
     if (!name || !price || !updated_by) {
@@ -189,10 +187,9 @@ exports.updateProduct = async (req, res) => {
         description = ?,
         weight = ?,
         unit = ?,
-        sale_price = ?,
-        expiry_date = ?
+        sale_price = ?
        WHERE id = ?`,
-      [name, price, updated_by, description || null, weight || null, unit || null, sale_price || null, expiry_date || null, id]
+      [name, price, updated_by, description || null, weight || null, unit || null, sale_price || null, id]
     );
 
     if (result.affectedRows === 0) {
@@ -210,9 +207,26 @@ exports.deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Kiểm tra tổng số lượng trong product_quantity liên quan đến product_id
+    const [quantityCheck] = await db.query(
+      'SELECT COALESCE(SUM(quantity), 0) as total_quantity FROM product_quantity WHERE product_id = ?',
+      [id]
+    );
+
+    if (quantityCheck.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy sản phẩm để kiểm tra số lượng' });
+    }
+
+    // Nếu tổng quantity > 0, không cho phép xóa
+    if (quantityCheck[0].total_quantity > 0) {
+      return res.status(400).json({ message: 'Không thể xóa sản phẩm có số lượng lớn hơn 0' });
+    }
+
+    // Xóa các hình ảnh liên quan
     await db.query('DELETE FROM product_image WHERE product_id = ?', [id]);
     await db.query('DELETE FROM product_category WHERE product_id = ?', [id]);
 
+    // Xóa sản phẩm
     const [result] = await db.query('DELETE FROM product WHERE id = ?', [id]);
 
     if (result.affectedRows === 0) {
@@ -226,7 +240,7 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-exports.getCategoriesByProduct = async (req,res)=>{
+exports.getCategoriesByProduct = async (req, res) => {
   const { id } = req.params;
   const [rows] = await db.query(`
     SELECT c.id, c.name
@@ -235,20 +249,21 @@ exports.getCategoriesByProduct = async (req,res)=>{
     WHERE pq.product_id = ? GROUP BY c.id`, [id]);
   res.json(rows);
 };
+
 exports.getProductsByStaff = async (req, res) => {
   try {
     const staffId = req.user.id;
 
-    // Lấy shop_id của staff
     const [[staffShop]] = await db.query(
-      'SELECT shop_id FROM users WHERE id = ?', [staffId]
+      'SELECT shop_id FROM users WHERE id = ?',
+      [staffId]
     );
     if (!staffShop) return res.status(400).json({ message: 'Staff chưa gắn shop' });
 
     const shopId = staffShop.shop_id;
 
     const [products] = await db.query(`
-      SELECT DISTINCT p.id, p.name, p.price, p.code, p.created_at,
+      SELECT DISTINCT p.id, p.name, p.price, p.code, p.weight, p.unit, p.sale_price, p.created_at,
         (SELECT url FROM product_image WHERE product_id = p.id LIMIT 1) AS image_url
       FROM product p
       JOIN product_quantity pq ON p.id = pq.product_id

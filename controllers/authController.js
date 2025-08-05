@@ -99,8 +99,8 @@ function authController(db) {
 
     forgotPassword: async (req, res) => {
       const { phone, newPassword } = req.body;
-      if (!phone || !newPassword) {
-        return res.status(400).json({ message: "Vui lòng nhập số điện thoại và mật khẩu mới!" });
+      if (!phone) {
+        return res.status(400).json({ message: "Vui lòng nhập số điện thoại!" });
       }
 
       try {
@@ -176,7 +176,12 @@ function authController(db) {
 
     getAll: async (req, res) => {
       try {
-        const [results] = await db.query("SELECT * FROM users ORDER BY id DESC");
+        const [results] = await db.query(`
+          SELECT users.*, shop.name AS shop_name 
+          FROM users 
+          LEFT JOIN shop ON users.shop_id = shop.id 
+          ORDER BY users.id DESC
+        `);
         res.json(results);
       } catch (err) {
         console.error("Lỗi lấy danh sách tất cả người dùng:", err);
